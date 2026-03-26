@@ -14,8 +14,11 @@ Older snapshots may need:
 | `002_lending_club_raw_clean.sql` | Placeholder note; superseded by `001_schema.sql`. |
 | `004_add_model_input_json.sql` | Adds `model_input_json` if the table predates it. |
 | `005_add_prediction_predicted_default_yn.sql` | Adds `predicted_default_yn` if `prediction_result` predates it. |
+| `006_seed_policy_rules.sql` | Inserts default `risk_policy_rule` rows for the policy engine (`POLICY_*`). Run after `001` before calling `POST /api/v1/decisions`. |
 
 Skip a migration if `001_schema.sql` already defines the same columns/constraints.
+
+**Policy engine:** `decision_result` uses `APPROVE` / `REVIEW` / `DECLINE` (not `MANUAL_REVIEW`). Fresh installs get this from `001_schema.sql`; legacy DBs may need a manual `ALTER` to match `001`.
 
 ## Frozen core tables (roles do not change)
 

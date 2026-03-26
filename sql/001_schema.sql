@@ -133,17 +133,26 @@ CREATE TABLE risk_policy_rule (
 CREATE INDEX idx_risk_policy_rule_active_priority ON risk_policy_rule (is_active, priority);
 
 CREATE TABLE decision_result (
-    id                BIGSERIAL PRIMARY KEY,
-    application_id    VARCHAR(64) NOT NULL,
-    prediction_id     BIGINT NOT NULL REFERENCES prediction_result (id) ON DELETE RESTRICT,
-    system_decision   VARCHAR(32) NOT NULL,
-    final_decision    VARCHAR(32) NOT NULL,
-    override_flag     BOOLEAN NOT NULL DEFAULT FALSE,
-    overridden_by     VARCHAR(128),
-    override_reason   TEXT,
-    decided_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT chk_decision_system CHECK (system_decision IN ('APPROVE', 'MANUAL_REVIEW', 'DECLINE')),
-    CONSTRAINT chk_decision_final CHECK (final_decision IN ('APPROVE', 'MANUAL_REVIEW', 'DECLINE'))
+    id                      BIGSERIAL PRIMARY KEY,
+    application_id        VARCHAR(64) NOT NULL,
+    prediction_id         BIGINT NOT NULL REFERENCES prediction_result (id) ON DELETE RESTRICT,
+    system_decision       VARCHAR(32) NOT NULL,
+    score_based_decision  VARCHAR(32) NOT NULL,
+    final_decision        VARCHAR(32) NOT NULL,
+    policy_adjusted_yn    CHAR(1) NOT NULL,
+    decision_reason_summary TEXT,
+    override_yn           CHAR(1) NOT NULL DEFAULT 'N',
+    decided_by            VARCHAR(64) NOT NULL DEFAULT 'system',
+    override_flag         BOOLEAN NOT NULL DEFAULT FALSE,
+    overridden_by         VARCHAR(128),
+    override_reason       TEXT,
+    decided_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_decision_result_prediction_id UNIQUE (prediction_id),
+    CONSTRAINT chk_decision_system CHECK (system_decision IN ('APPROVE', 'REVIEW', 'DECLINE')),
+    CONSTRAINT chk_decision_score_based CHECK (score_based_decision IN ('APPROVE', 'REVIEW', 'DECLINE')),
+    CONSTRAINT chk_decision_final CHECK (final_decision IN ('APPROVE', 'REVIEW', 'DECLINE')),
+    CONSTRAINT chk_decision_policy_adjusted CHECK (policy_adjusted_yn IN ('Y', 'N')),
+    CONSTRAINT chk_decision_override_yn CHECK (override_yn IN ('Y', 'N'))
 );
 
 CREATE INDEX idx_decision_result_application_id ON decision_result (application_id);

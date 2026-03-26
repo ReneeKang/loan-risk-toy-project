@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging_config import configure_logging
-from app.routers import health_router, predictions_router
+from app.routers import decisions_router, health_router, predictions_router
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,13 @@ def create_app() -> FastAPI:
                 "description": (
                     "모델 레지스트리에 등록된 학습 모델로 **단건 예측**을 수행하고, "
                     "`prediction_result`에 저장된 **예측 결과를 조회**합니다."
+                ),
+            },
+            {
+                "name": "decisions",
+                "description": (
+                    "**risk_score** 구간과 **정책 룰**을 적용해 승인/심사/거절 형태의 "
+                    "**final_decision**을 저장·조회합니다."
                 ),
             },
         ],
@@ -75,6 +82,7 @@ def create_app() -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(predictions_router)
+    application.include_router(decisions_router)
     return application
 
 

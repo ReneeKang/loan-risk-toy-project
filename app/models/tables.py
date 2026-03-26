@@ -227,7 +227,12 @@ class DecisionResult(Base):
         nullable=False,
     )
     system_decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    score_based_decision: Mapped[str] = mapped_column(String(32), nullable=False)
     final_decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_adjusted_yn: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    decision_reason_summary: Mapped[Optional[str]] = mapped_column(Text)
+    override_yn: Mapped[str] = mapped_column(CHAR(1), nullable=False, server_default=text("'N'"))
+    decided_by: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'system'"))
     override_flag: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
