@@ -1,0 +1,3 @@
+-- Superseded by sql/001_schema.sql (raw_id PK, source_file_name, source_row_no,
+-- application_id PK on clean, target_default_yn, feature.application_id FK).
+-- Existing databases: backup data, then recreate schema from 001_schema.sql or apply manual ALTERs.

@@ -1,0 +1,192 @@
+-- Loan risk toy project — PostgreSQL DDL
+-- Database: loan_risk
+--   1) sql/000_create_database.sql 로 DB 생성
+--   2) psql -U <user> -d loan_risk -f sql/001_schema.sql
+-- Aligns with loan_risk_toy_project_prd.md (raw → clean → feature → model → prediction → decision)
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1) RAW — 원천 CSV 적재
+-- ---------------------------------------------------------------------------
+CREATE TABLE loan_application_raw (
+    id              BIGSERIAL PRIMARY KEY,
+    application_id  VARCHAR(64) NOT NULL,
+    source_file     VARCHAR(512),
+    raw_row         JSONB NOT NULL,
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE loan_application_raw IS 'Lending Club 등 원천 CSV 행 적재 (스키마 유연성을 위해 JSONB)';
+COMMENT ON COLUMN loan_application_raw.application_id IS '대출/신청 식별자 (Lending Club id 등)';
+
+CREATE INDEX idx_loan_application_raw_application_id ON loan_application_raw (application_id);
+CREATE INDEX idx_loan_application_raw_ingested_at ON loan_application_raw (ingested_at);
+
+-- 동일 신청 + 동일 소스 파일 중복 적재 방지 (source_file NULL 은 '' 로 묶음)
+CREATE UNIQUE INDEX uq_loan_application_raw_app_file
+    ON loan_application_raw (application_id, (COALESCE(source_file, ''::VARCHAR)));
+
+-- ---------------------------------------------------------------------------
+-- 2) CLEAN — 정제 후 신청 데이터
+-- ---------------------------------------------------------------------------
+CREATE TABLE loan_application_clean (
+    id                  BIGSERIAL PRIMARY KEY,
+    application_id      VARCHAR(64) NOT NULL,
+    raw_id              BIGINT REFERENCES loan_application_raw (id) ON DELETE SET NULL,
+    loan_amnt           NUMERIC(14, 2),
+    term                VARCHAR(32),
+    int_rate            NUMERIC(8, 4),
+    installment         NUMERIC(14, 2),
+    grade               VARCHAR(8),
+    sub_grade           VARCHAR(8),
+    emp_title           VARCHAR(256),
+    emp_length          VARCHAR(64),
+    home_ownership      VARCHAR(32),
+    annual_inc          NUMERIC(16, 2),
+    verification_status VARCHAR(32),
+    issue_d             DATE,
+    loan_status         VARCHAR(64),
+    purpose             VARCHAR(128),
+    zip_code            VARCHAR(16),
+    addr_state          VARCHAR(8),
+    dti                 NUMERIC(8, 4),
+    delinq_2yrs         INTEGER,
+    earliest_cr_line    DATE,
+    open_acc            INTEGER,
+    pub_rec             INTEGER,
+    revol_bal           NUMERIC(16, 2),
+    revol_util          NUMERIC(8, 4),
+    total_acc           INTEGER,
+    target_bad          SMALLINT,
+    cleaned_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_loan_application_clean_application_id UNIQUE (application_id)
+);
+
+COMMENT ON TABLE loan_application_clean IS '전처리·결측·이상치 처리 후 신청 단위 스냅샷';
+COMMENT ON COLUMN loan_application_clean.target_bad IS '학습용 부도/연체 라벨 (0/1), 운영 추론 시 NULL 가능';
+COMMENT ON COLUMN loan_application_clean.dti IS '정책 룰 예: dti >= 30';
+COMMENT ON COLUMN loan_application_clean.delinq_2yrs IS '정책 룰 예: delinq_2yrs >= 2';
+
+CREATE INDEX idx_loan_application_clean_raw_id ON loan_application_clean (raw_id);
+CREATE INDEX idx_loan_application_clean_loan_status ON loan_application_clean (loan_status);
+
+-- ---------------------------------------------------------------------------
+-- 3) FEATURE — 모델 입력 피처 (최소 Feature Store: 버전 + 벡터)
+-- ---------------------------------------------------------------------------
+CREATE TABLE loan_application_feature (
+    id               BIGSERIAL PRIMARY KEY,
+    application_id   VARCHAR(64) NOT NULL,
+    clean_id         BIGINT NOT NULL REFERENCES loan_application_clean (id) ON DELETE CASCADE,
+    feature_version  VARCHAR(64) NOT NULL,
+    features         JSONB NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_loan_application_feature_app_version UNIQUE (application_id, feature_version)
+);
+
+COMMENT ON TABLE loan_application_feature IS '피처 버전별 모델 입력 피처 (JSONB로 컬럼 집합 버전 관리)';
+COMMENT ON COLUMN loan_application_feature.feature_version IS 'model_registry.feature_version 과 매칭';
+
+CREATE INDEX idx_loan_application_feature_clean_id ON loan_application_feature (clean_id);
+CREATE INDEX idx_loan_application_feature_features_gin ON loan_application_feature USING GIN (features);
+
+-- ---------------------------------------------------------------------------
+-- 4) MODEL_REGISTRY — 모델 버전·성능·아티팩트
+-- ---------------------------------------------------------------------------
+CREATE TABLE model_registry (
+    id               BIGSERIAL PRIMARY KEY,
+    model_name       VARCHAR(128) NOT NULL,
+    model_version    VARCHAR(64) NOT NULL,
+    algorithm        VARCHAR(64) NOT NULL,
+    feature_version  VARCHAR(64) NOT NULL,
+    auc              NUMERIC(7, 6),
+    recall           NUMERIC(7, 6),
+    precision        NUMERIC(7, 6),
+    artifact_uri     TEXT,
+    is_active        BOOLEAN NOT NULL DEFAULT FALSE,
+    trained_at       TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_model_registry_name_version UNIQUE (model_name, model_version)
+);
+
+COMMENT ON TABLE model_registry IS '학습된 모델 메타 및 성능 지표; 활성 버전 플래그';
+COMMENT ON COLUMN model_registry.is_active IS '서빙/배치 예측에 사용할 단일 활성 모델 선택용';
+
+CREATE INDEX idx_model_registry_active ON model_registry (is_active) WHERE is_active = TRUE;
+
+-- ---------------------------------------------------------------------------
+-- 5) PREDICTION — 모델 예측 결과 (risk_score만; 최종 승인/거절은 decision에서)
+-- ---------------------------------------------------------------------------
+CREATE TABLE prediction_result (
+    id                 BIGSERIAL PRIMARY KEY,
+    application_id     VARCHAR(64) NOT NULL,
+    feature_id         BIGINT NOT NULL REFERENCES loan_application_feature (id) ON DELETE RESTRICT,
+    model_registry_id  BIGINT NOT NULL REFERENCES model_registry (id) ON DELETE RESTRICT,
+    risk_score         NUMERIC(10, 8) NOT NULL,
+    risk_grade         CHAR(1) NOT NULL,
+    predicted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_prediction_risk_score CHECK (risk_score >= 0::NUMERIC AND risk_score <= 1::NUMERIC),
+    CONSTRAINT chk_prediction_risk_grade CHECK (risk_grade IN ('A', 'B', 'C', 'D', 'E'))
+);
+
+COMMENT ON TABLE prediction_result IS '부실 확률 risk_score 및 등급 A~E (PRD 5.1)';
+COMMENT ON COLUMN prediction_result.risk_grade IS 'A: score<0.2, B: [0.2,0.4), C: [0.4,0.6), D: [0.6,0.8), E: >=0.8';
+
+CREATE INDEX idx_prediction_result_application_id ON prediction_result (application_id);
+CREATE INDEX idx_prediction_result_model_registry_id ON prediction_result (model_registry_id);
+CREATE INDEX idx_prediction_result_predicted_at ON prediction_result (predicted_at);
+
+-- ---------------------------------------------------------------------------
+-- 6) DECISION — 정책 룰 마스터, 최종 의사결정, 룰 적용 이력
+-- ---------------------------------------------------------------------------
+CREATE TABLE risk_policy_rule (
+    id            BIGSERIAL PRIMARY KEY,
+    rule_code     VARCHAR(64) NOT NULL UNIQUE,
+    rule_name     VARCHAR(256) NOT NULL,
+    description   TEXT,
+    priority      INTEGER NOT NULL DEFAULT 100,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    condition_sql TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE risk_policy_rule IS '리스크 정책 룰 마스터 (예: delinq_2yrs, dti, 대출/소득 비율)';
+COMMENT ON COLUMN risk_policy_rule.priority IS '낮을수록 우선(구현체에서 정의)';
+
+CREATE INDEX idx_risk_policy_rule_active_priority ON risk_policy_rule (is_active, priority);
+
+CREATE TABLE decision_result (
+    id                BIGSERIAL PRIMARY KEY,
+    application_id    VARCHAR(64) NOT NULL,
+    prediction_id     BIGINT NOT NULL REFERENCES prediction_result (id) ON DELETE RESTRICT,
+    system_decision   VARCHAR(32) NOT NULL,
+    final_decision    VARCHAR(32) NOT NULL,
+    override_flag     BOOLEAN NOT NULL DEFAULT FALSE,
+    overridden_by     VARCHAR(128),
+    override_reason   TEXT,
+    decided_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT chk_decision_system CHECK (system_decision IN ('APPROVE', 'MANUAL_REVIEW', 'DECLINE')),
+    CONSTRAINT chk_decision_final CHECK (final_decision IN ('APPROVE', 'MANUAL_REVIEW', 'DECLINE'))
+);
+
+COMMENT ON TABLE decision_result IS '정책 엔진 산출 system_decision 및 Override 반영 final_decision';
+COMMENT ON COLUMN decision_result.override_flag IS '심사자 수동 변경 시 TRUE (PRD 5.4)';
+
+CREATE INDEX idx_decision_result_application_id ON decision_result (application_id);
+CREATE INDEX idx_decision_result_prediction_id ON decision_result (prediction_id);
+
+CREATE TABLE decision_rule_hit (
+    id           BIGSERIAL PRIMARY KEY,
+    decision_id  BIGINT NOT NULL REFERENCES decision_result (id) ON DELETE CASCADE,
+    rule_id      BIGINT NOT NULL REFERENCES risk_policy_rule (id) ON DELETE RESTRICT,
+    matched      BOOLEAN NOT NULL DEFAULT TRUE,
+    detail       JSONB,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE decision_rule_hit IS '의사결정 시 매칭된 정책 룰 이력 (감사/설명용)';
+
+CREATE INDEX idx_decision_rule_hit_decision_id ON decision_rule_hit (decision_id);
+CREATE INDEX idx_decision_rule_hit_rule_id ON decision_rule_hit (rule_id);
+
+COMMIT;

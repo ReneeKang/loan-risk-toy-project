@@ -1,0 +1,66 @@
+# --- Project-specific (local / not for remote) ---
+/tasks.md
+/cursor_prompts.md
+/loan_risk_toy_project_prd.md
+
+# docs: 원격에 올릴 문서만 예외 (나머지 docs/*.md 등은 로컬 전용)
+/docs/*
+!/docs/architecture.md
+!/docs/architecture_v2.md
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Packaging / install metadata
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+
+# Testing & type check / linters
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# --- FastAPI / runtime ---
+*.log
+logs/
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# --- Raw data (CSV 등 로컬 전용) ---
+/data/raw/*
+!/data/raw/.gitkeep
+
+# --- ML artifacts (대용량 바이너리; 폴더만 유지하려면 .gitkeep 유지) ---
+/ml/artifacts/*
+!/ml/artifacts/.gitkeep
