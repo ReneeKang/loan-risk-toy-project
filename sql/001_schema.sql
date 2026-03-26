@@ -1,3 +1,17 @@
+-- =============================================================================
+-- CANONICAL SCHEMA for database loan_risk (apply after 000_create_database.sql).
+--
+-- Frozen roles (do not repurpose these tables):
+--   raw:              source ingestion; raw_payload + source line identity
+--   clean:            normalized application; target_default_yn IN ('Y','N') only
+--   feature:          model_input_json = official ML input; feature_version
+--   model_registry:   model metadata, artifact_uri, feature_version link
+--   prediction_result: official outputs risk_score, predicted_default_yn, risk_grade
+--
+-- Further changes: ADD COLUMN or new sql/NNN_*.sql migrations only.
+-- =============================================================================
+
+-- raw: immutable source rows
 CREATE TABLE loan_application_raw (
     raw_id           BIGSERIAL PRIMARY KEY,
     application_id   VARCHAR(64),
@@ -14,6 +28,7 @@ CREATE INDEX idx_loan_application_raw_ingested_at ON loan_application_raw (inges
 CREATE INDEX idx_loan_application_raw_source_system ON loan_application_raw (source_system);
 CREATE INDEX idx_loan_application_raw_source_file ON loan_application_raw (source_file_name);
 
+-- clean: normalized labels; training label Y/N only on this layer
 CREATE TABLE loan_application_clean (
     application_id       VARCHAR(64) NOT NULL PRIMARY KEY,
     raw_id                 BIGINT REFERENCES loan_application_raw (raw_id) ON DELETE SET NULL,
@@ -50,6 +65,7 @@ CREATE TABLE loan_application_clean (
 CREATE INDEX idx_loan_application_clean_raw_id ON loan_application_clean (raw_id);
 CREATE INDEX idx_loan_application_clean_loan_status ON loan_application_clean (loan_status);
 
+-- feature: official model input is model_input_json (features may mirror for audit)
 CREATE TABLE loan_application_feature (
     id                 BIGSERIAL PRIMARY KEY,
     application_id     VARCHAR(64) NOT NULL REFERENCES loan_application_clean (application_id) ON DELETE CASCADE,
@@ -64,6 +80,7 @@ CREATE INDEX idx_loan_application_feature_application_id ON loan_application_fea
 CREATE INDEX idx_loan_application_feature_features_gin ON loan_application_feature USING GIN (features);
 CREATE INDEX idx_loan_application_feature_model_input_gin ON loan_application_feature USING GIN (model_input_json);
 
+-- model_registry: artifact + version metadata
 CREATE TABLE model_registry (
     id               BIGSERIAL PRIMARY KEY,
     model_name       VARCHAR(128) NOT NULL,
@@ -82,22 +99,26 @@ CREATE TABLE model_registry (
 
 CREATE INDEX idx_model_registry_active ON model_registry (is_active) WHERE is_active = TRUE;
 
+-- prediction_result: official scores (risk_score, predicted_default_yn, risk_grade)
 CREATE TABLE prediction_result (
-    id                 BIGSERIAL PRIMARY KEY,
-    application_id     VARCHAR(64) NOT NULL,
-    feature_id         BIGINT NOT NULL REFERENCES loan_application_feature (id) ON DELETE RESTRICT,
-    model_registry_id  BIGINT NOT NULL REFERENCES model_registry (id) ON DELETE RESTRICT,
-    risk_score         NUMERIC(10, 8) NOT NULL,
-    risk_grade         CHAR(1) NOT NULL,
-    predicted_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    id                     BIGSERIAL PRIMARY KEY,
+    application_id         VARCHAR(64) NOT NULL,
+    feature_id             BIGINT NOT NULL REFERENCES loan_application_feature (id) ON DELETE RESTRICT,
+    model_registry_id      BIGINT NOT NULL REFERENCES model_registry (id) ON DELETE RESTRICT,
+    risk_score             NUMERIC(10, 8) NOT NULL,
+    risk_grade             CHAR(1) NOT NULL,
+    predicted_default_yn   CHAR(1) NOT NULL,
+    predicted_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT chk_prediction_risk_score CHECK (risk_score >= 0::NUMERIC AND risk_score <= 1::NUMERIC),
-    CONSTRAINT chk_prediction_risk_grade CHECK (risk_grade IN ('A', 'B', 'C', 'D', 'E'))
+    CONSTRAINT chk_prediction_risk_grade CHECK (risk_grade IN ('A', 'B', 'C', 'D', 'E')),
+    CONSTRAINT chk_prediction_predicted_default_yn CHECK (predicted_default_yn IN ('Y', 'N'))
 );
 
 CREATE INDEX idx_prediction_result_application_id ON prediction_result (application_id);
 CREATE INDEX idx_prediction_result_model_registry_id ON prediction_result (model_registry_id);
 CREATE INDEX idx_prediction_result_predicted_at ON prediction_result (predicted_at);
 
+-- decision / policy (extend via new columns or migrations; separate from core ML pipeline roles above)
 CREATE TABLE risk_policy_rule (
     id            BIGSERIAL PRIMARY KEY,
     rule_code     VARCHAR(64) NOT NULL UNIQUE,

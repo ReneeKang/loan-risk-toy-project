@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-"""Clean-layer transforms. Binary (0/1) targets for ML belong in feature/model stages."""
+"""
+Clean-layer transforms. Persisted label: target_default_yn = Y or N only (DB CHECK).
+Binary 0/1 for ML is derived in feature/model code, not stored on clean.
+"""
 
 import re
 from datetime import date

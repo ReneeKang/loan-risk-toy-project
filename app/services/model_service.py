@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""
+Training: reads model_input_json from loan_application_feature (joined with clean for Y/N).
+TRAINING_FEATURE_COLUMNS align with keys in model_input_json.
+"""
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal

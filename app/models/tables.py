@@ -1,5 +1,18 @@
 from __future__ import annotations
 
+"""
+ORM mapping for PostgreSQL.
+
+Schema contract (frozen roles; extend via new columns / migrations only):
+  - loan_application_raw: source ingestion
+  - loan_application_clean: normalized rows; target_default_yn is Y or N
+  - loan_application_feature: model_input_json is the official model input
+  - model_registry: trained model metadata + artifact_uri
+  - prediction_result: official outputs risk_score, predicted_default_yn, risk_grade
+
+See sql/001_schema.sql and sql/README.md.
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -25,6 +38,8 @@ from app.models.base import Base
 
 
 class LoanApplicationRaw(Base):
+    """Source-only ingestion (raw_payload + source line identity)."""
+
     __tablename__ = "loan_application_raw"
 
     raw_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -45,6 +60,8 @@ class LoanApplicationRaw(Base):
 
 
 class LoanApplicationClean(Base):
+    """Normalized application; training label target_default_yn is Y or N only."""
+
     __tablename__ = "loan_application_clean"
 
     application_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -92,6 +109,8 @@ class LoanApplicationClean(Base):
 
 
 class LoanApplicationFeature(Base):
+    """Feature row per feature_version; model_input_json is the official model input."""
+
     __tablename__ = "loan_application_feature"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -101,6 +120,7 @@ class LoanApplicationFeature(Base):
         nullable=False,
     )
     feature_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Snapshot / extended JSON; training and inference must use model_input_json.
     features: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     model_input_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -116,6 +136,8 @@ class LoanApplicationFeature(Base):
 
 
 class ModelRegistry(Base):
+    """Registered model metadata; links feature_version to artifact_uri."""
+
     __tablename__ = "model_registry"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -141,6 +163,8 @@ class ModelRegistry(Base):
 
 
 class PredictionResult(Base):
+    """Model output row; official columns: risk_score, predicted_default_yn, risk_grade."""
+
     __tablename__ = "prediction_result"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -157,6 +181,7 @@ class PredictionResult(Base):
     )
     risk_score: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
     risk_grade: Mapped[str] = mapped_column(CHAR(1), nullable=False)
+    predicted_default_yn: Mapped[str] = mapped_column(CHAR(1), nullable=False)
     predicted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

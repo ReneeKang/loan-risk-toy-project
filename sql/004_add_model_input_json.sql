@@ -1,4 +1,5 @@
--- Add model_input_json to existing loan_application_feature (pre-refactor DBs).
+-- Migration: add official ML column model_input_json (pre-001 DBs only).
+-- Canonical: sql/001_schema.sql. Policy: sql/README.md
 
 ALTER TABLE loan_application_feature
     ADD COLUMN IF NOT EXISTS model_input_json JSONB;

@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Feature build: persists rows in loan_application_feature.
+
+Official model input: model_input_json (must match training/inference column contract).
+The `features` column is populated with the same payload for compatibility; new code
+should read model_input_json only.
+"""
+
 from typing import Any
 
 from sqlalchemy.orm import Session

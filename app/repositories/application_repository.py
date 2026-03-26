@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""loan_application_raw and loan_application_clean persistence."""
+
 from collections.abc import Iterable
 
 from sqlalchemy import select

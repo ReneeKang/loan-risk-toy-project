@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+"""
+Ingestion: writes loan_application_raw (source) and loan_application_clean (normalized).
+Does not change the schema roles of raw/clean; see sql/README.md.
+"""
+
 import logging
 from pathlib import Path
 from typing import Iterator, Literal
