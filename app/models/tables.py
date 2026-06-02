@@ -9,6 +9,8 @@ Schema contract (frozen roles; extend via new columns / migrations only):
   - loan_application_feature: model_input_json is the official model input
   - model_registry: trained model metadata + artifact_uri
   - prediction_result: official outputs risk_score, predicted_default_yn, risk_grade
+  - explanation_result: SHAP top features linked to prediction_result
+  - llm_review_result: LLM-generated 심사 코멘트 per prediction_id
 
 See sql/001_schema.sql and sql/README.md.
 """
@@ -193,6 +195,57 @@ class PredictionResult(Base):
     decisions: Mapped[list["DecisionResult"]] = relationship(
         back_populates="prediction",
     )
+    explanations: Mapped[list["ExplanationResult"]] = relationship(
+        back_populates="prediction",
+    )
+    llm_review: Mapped[Optional["LlmReviewResult"]] = relationship(
+        back_populates="prediction",
+        uselist=False,
+    )
+
+
+class ExplanationResult(Base):
+    """SHAP contribution row for a single feature; ranked by |shap| within prediction_id."""
+
+    __tablename__ = "explanation_result"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    application_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    prediction_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("prediction_result.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    feature_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    shap_value: Mapped[Decimal] = mapped_column(Numeric(14, 8), nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    prediction: Mapped["PredictionResult"] = relationship(back_populates="explanations")
+
+
+class LlmReviewResult(Base):
+    """LLM-generated Korean 심사 코멘트; at most one row per prediction_id."""
+
+    __tablename__ = "llm_review_result"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    application_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    prediction_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("prediction_result.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    review_comment: Mapped[str] = mapped_column(Text, nullable=False)
+    llm_model: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    prediction: Mapped["PredictionResult"] = relationship(back_populates="llm_review")
 
 
 class RiskPolicyRule(Base):

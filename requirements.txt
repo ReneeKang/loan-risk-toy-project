@@ -8,3 +8,5 @@ lightgbm
 scikit-learn
 joblib
 numpy
+shap
+openai

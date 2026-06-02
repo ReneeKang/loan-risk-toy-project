@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.decision import DecisionConflictBody, DecisionCreateRequest, DecisionResponse
 from app.services import policy_engine_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/decisions", tags=["decisions"])
 
@@ -44,21 +47,46 @@ def create_decision(
         )
     except LookupError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/decisions failed (404): prediction_id=%s — %s",
+            body.prediction_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     except ValueError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/decisions failed (400): prediction_id=%s — %s",
+            body.prediction_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
     except RuntimeError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/decisions failed (503): prediction_id=%s — %s",
+            body.prediction_id,
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "POST /api/v1/decisions failed (unexpected): prediction_id=%s",
+            body.prediction_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Policy decision failed",
         ) from exc
 
     if not is_new:
@@ -72,9 +100,20 @@ def create_decision(
             content=conflict.model_dump(mode="json"),
         )
 
-    db.commit()
-    db.refresh(decision)
-    return policy_engine_service.decision_to_response(db, decision)
+    try:
+        db.commit()
+        db.refresh(decision)
+        return policy_engine_service.decision_to_response(db, decision)
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "POST /api/v1/decisions commit/response failed: prediction_id=%s",
+            body.prediction_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Policy decision failed",
+        ) from exc
 
 
 @router.get(
@@ -94,6 +133,10 @@ def get_decision(
 
     row = dec_repo.get_decision_by_id(db, decision_id)
     if row is None:
+        logger.warning(
+            "GET /api/v1/decisions/%s: decision not found",
+            decision_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"decision_id={decision_id} not found",

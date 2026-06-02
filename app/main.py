@@ -3,13 +3,20 @@ from __future__ import annotations
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.logging_config import configure_logging
-from app.routers import decisions_router, health_router, predictions_router
+from app.core.openapi_cache_middleware import DisableOpenAPICacheMiddleware
+from app.routers import (
+    decisions_router,
+    explanations_router,
+    health_router,
+    predictions_router,
+    reviews_router,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +54,37 @@ def create_app() -> FastAPI:
                     "**final_decision**을 저장·조회합니다."
                 ),
             },
+            {
+                "name": "explanations",
+                "description": (
+                    "LightGBM 예측에 대해 **SHAP(TreeExplainer)** 으로 주요 위험 요인을 계산하고 "
+                    "`explanation_result`에 저장·조회합니다."
+                ),
+            },
+            {
+                "name": "reviews",
+                "description": (
+                    "예측·SHAP 요약을 바탕으로 **LLM 심사 코멘트**(한국어)를 생성·저장하고 "
+                    "`llm_review_result`에서 조회합니다."
+                ),
+            },
         ],
     )
+
+    @application.exception_handler(HTTPException)
+    async def logging_http_exception_handler(
+        request: Request,
+        exc: HTTPException,
+    ) -> JSONResponse:
+        """라우터에서 올린 HTTPException: 5xx는 app.main에 ERROR로 남김."""
+        if exc.status_code >= 500:
+            logger.error(
+                "HTTP %s %s — %s",
+                request.method,
+                request.url.path,
+                exc.detail,
+            )
+        return await http_exception_handler(request, exc)
 
     @application.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -63,13 +99,28 @@ def create_app() -> FastAPI:
         )
         return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
+    @application.exception_handler(ResponseValidationError)
+    async def response_validation_exception_handler(
+        request: Request,
+        exc: ResponseValidationError,
+    ) -> JSONResponse:
+        logger.error(
+            "Response validation failed: %s %s — %s",
+            request.method,
+            request.url.path,
+            exc.errors(),
+            exc_info=exc,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
+
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(
         request: Request,
         exc: Exception,
     ) -> JSONResponse:
-        if isinstance(exc, HTTPException):
-            return await http_exception_handler(request, exc)
         logger.exception(
             "Unhandled error: %s %s",
             request.method,
@@ -83,6 +134,12 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(predictions_router)
     application.include_router(decisions_router)
+    application.include_router(explanations_router)
+    application.include_router(reviews_router)
+
+    # OpenAPI / Swagger / ReDoc: 브라우저 캐시로 구 스펙이 남지 않도록
+    application.add_middleware(DisableOpenAPICacheMiddleware)
+
     return application
 
 

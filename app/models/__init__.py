@@ -4,6 +4,8 @@ from app.models.base import Base
 from app.models.tables import (
     DecisionResult,
     DecisionRuleHit,
+    ExplanationResult,
+    LlmReviewResult,
     LoanApplicationClean,
     LoanApplicationFeature,
     LoanApplicationRaw,
@@ -16,6 +18,8 @@ __all__ = [
     "Base",
     "DecisionResult",
     "DecisionRuleHit",
+    "ExplanationResult",
+    "LlmReviewResult",
     "LoanApplicationClean",
     "LoanApplicationFeature",
     "LoanApplicationRaw",

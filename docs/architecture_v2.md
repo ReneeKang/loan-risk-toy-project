@@ -1,6 +1,10 @@
 # 아키텍처 v2 (Loan Risk Toy Project)
 
+> **통합본:** [`architecture_unified.md`](architecture_unified.md)에 본 문서와 v1·v3가 합쳐져 있다. 새로 읽을 때는 통합본을 우선한다.
+
 `architecture.md`의 요약을 유지하면서, 설계 의도·도메인 규칙·확장 단계를 한곳에 모은 문서다. (상세 원문은 로컬 전용 `loan_risk_toy_project_prd.md`를 참고한다.)
+
+**구현이 반영된 최신 스냅샷**은 [`architecture_v3.md`](architecture_v3.md)를 본다.
 
 ---
 

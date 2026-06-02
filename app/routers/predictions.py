@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -9,6 +10,8 @@ from app.core.database import get_db
 from app.repositories import prediction_repository as pred_repo
 from app.schemas.prediction import PredictionCreateRequest, PredictionResponse
 from app.services import prediction_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/predictions", tags=["predictions"])
 
@@ -39,26 +42,50 @@ def create_prediction(
         )
         db.commit()
         db.refresh(row)
+        return PredictionResponse.model_validate(row)
     except LookupError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/predictions failed (404): application_id=%r — %s",
+            body.application_id.strip(),
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     except FileNotFoundError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/predictions failed (404 artifact): application_id=%r — %s",
+            body.application_id.strip(),
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
     except ValueError as exc:
         db.rollback()
+        logger.warning(
+            "POST /api/v1/predictions failed (400): application_id=%r — %s",
+            body.application_id.strip(),
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-
-    return PredictionResponse.model_validate(row)
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "POST /api/v1/predictions failed (unexpected): application_id=%r",
+            body.application_id.strip(),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Prediction failed",
+        ) from exc
 
 
 @router.get(
@@ -80,6 +107,10 @@ def get_prediction(
 ) -> PredictionResponse:
     row = pred_repo.get_prediction_by_id(db, prediction_id)
     if row is None:
+        logger.warning(
+            "GET /api/v1/predictions/%s: prediction not found",
+            prediction_id,
+        )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"prediction_id={prediction_id} not found",

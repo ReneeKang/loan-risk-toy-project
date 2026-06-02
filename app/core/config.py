@@ -27,6 +27,18 @@ class Settings(BaseModel):
         default="INFO",
         description="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     )
+    openai_api_key: str | None = Field(
+        default=None,
+        description="OpenAI API key for LLM 심사 코멘트 (GET /api/v1/reviews)",
+    )
+    openai_base_url: str | None = Field(
+        default=None,
+        description="Optional OpenAI-compatible API base URL",
+    )
+    llm_model: str = Field(
+        default="gpt-4o-mini",
+        description="Chat completion model name",
+    )
 
     model_config = {"frozen": True}
 
@@ -46,7 +58,21 @@ class Settings(BaseModel):
                 url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
             base = cls(database_url=url)
         log_level = os.getenv("LOG_LEVEL", base.log_level)
-        return base.model_copy(update={"log_level": log_level})
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if openai_api_key is not None and openai_api_key.strip() == "":
+            openai_api_key = None
+        openai_base_url = os.getenv("OPENAI_BASE_URL")
+        if openai_base_url is not None and openai_base_url.strip() == "":
+            openai_base_url = None
+        llm_model = os.getenv("LLM_MODEL", base.llm_model)
+        return base.model_copy(
+            update={
+                "log_level": log_level,
+                "openai_api_key": openai_api_key,
+                "openai_base_url": openai_base_url,
+                "llm_model": llm_model,
+            },
+        )
 
 
 @lru_cache
